@@ -50,8 +50,9 @@ type updateStatusInput struct {
 func main() {
 	databaseURL := envOrDefault(
 		"DATABASE_URL",
-		"postgres://postgres:postgres@127.0.0.1:5433/pedidos?sslmode=disable",
+		"postgres://pedidos_admin:pedidos_clave_2026@127.0.0.1:55432/pedidos?sslmode=disable",
 	)
+
 	log.Println("DATABASE_URL utilizada:", databaseURL)
 
 	db, err := pgxpool.New(context.Background(), databaseURL)
