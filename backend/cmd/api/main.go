@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,6 +25,7 @@ type application struct {
 
 type order struct {
 	ID              int64      `json:"id"`
+	PublicCode      string     `json:"public_code"`
 	CustomerName    string     `json:"customer_name"`
 	CustomerEmail   string     `json:"customer_email"`
 	ProductName     string     `json:"product_name"`
@@ -89,6 +92,10 @@ func main() {
 		"GET /api/orders",
 		app.requireAuth(app.listOrders),
 	)
+	mux.HandleFunc(
+		"GET /api/orders/code/{code}",
+		app.requireAuth(app.getOrderByPublicCode),
+	)
 
 	mux.HandleFunc(
 		"POST /api/orders",
@@ -118,6 +125,7 @@ func (app *application) listOrders(w http.ResponseWriter, r *http.Request) {
 	rows, err := app.db.Query(r.Context(), `
 		SELECT
 			id,
+			COALESCE(public_code, ''),
 			customer_name,
 			customer_email,
 			product_name,
@@ -144,6 +152,7 @@ func (app *application) listOrders(w http.ResponseWriter, r *http.Request) {
 
 		err := rows.Scan(
 			&item.ID,
+			&item.PublicCode,
 			&item.CustomerName,
 			&item.CustomerEmail,
 			&item.ProductName,
@@ -199,51 +208,87 @@ func (app *application) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var created order
+	var insertErr error
 
-	err := app.db.QueryRow(r.Context(), `
-		INSERT INTO orders (
-			customer_name,
-			customer_email,
-			product_name,
-			quantity,
-			shipping_address,
-			notes
+	const maxCodeAttempts = 5
+
+	for attempt := 0; attempt < maxCodeAttempts; attempt++ {
+		publicCode, err := generatePublicOrderCode(time.Now())
+		if err != nil {
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				"no se pudo generar el código del pedido",
+			)
+			return
+		}
+
+		insertErr = app.db.QueryRow(
+			r.Context(),
+			`
+			INSERT INTO orders (
+				public_code,
+				customer_name,
+				customer_email,
+				product_name,
+				quantity,
+				shipping_address,
+				notes
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING
+				id,
+				public_code,
+				customer_name,
+				customer_email,
+				product_name,
+				quantity,
+				shipping_address,
+				notes,
+				status,
+				created_at,
+				shipped_at,
+				received_at
+		`,
+			publicCode,
+			input.CustomerName,
+			input.CustomerEmail,
+			input.ProductName,
+			input.Quantity,
+			input.ShippingAddress,
+			input.Notes,
+		).Scan(
+			&created.ID,
+			&created.PublicCode,
+			&created.CustomerName,
+			&created.CustomerEmail,
+			&created.ProductName,
+			&created.Quantity,
+			&created.ShippingAddress,
+			&created.Notes,
+			&created.Status,
+			&created.CreatedAt,
+			&created.ShippedAt,
+			&created.ReceivedAt,
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING
-			id,
-			customer_name,
-			customer_email,
-			product_name,
-			quantity,
-			shipping_address,
-			notes,
-			status,
-			created_at,
-			shipped_at,
-			received_at
-	`,
-		input.CustomerName,
-		input.CustomerEmail,
-		input.ProductName,
-		input.Quantity,
-		input.ShippingAddress,
-		input.Notes,
-	).Scan(
-		&created.ID,
-		&created.CustomerName,
-		&created.CustomerEmail,
-		&created.ProductName,
-		&created.Quantity,
-		&created.ShippingAddress,
-		&created.Notes,
-		&created.Status,
-		&created.CreatedAt,
-		&created.ShippedAt,
-		&created.ReceivedAt,
-	)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "no se pudo crear el pedido")
+
+		if insertErr == nil {
+			break
+		}
+
+		if !isUniqueViolation(insertErr) {
+			break
+		}
+	}
+
+	if insertErr != nil {
+		log.Printf("error creando pedido: %v", insertErr)
+
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"no se pudo crear el pedido",
+		)
 		return
 	}
 
@@ -291,19 +336,21 @@ func (app *application) updateOrderStatus(w http.ResponseWriter, r *http.Request
 			END
 		WHERE id = $1
 		RETURNING
-			id,
-			customer_name,
-			customer_email,
-			product_name,
-			quantity,
-			shipping_address,
-			notes,
-			status,
-			created_at,
-			shipped_at,
-			received_at
+    id,
+    COALESCE(public_code, ''),
+    customer_name,
+    customer_email,
+    product_name,
+    quantity,
+    shipping_address,
+    notes,
+    status,
+    created_at,
+    shipped_at,
+    received_at
 	`, id, input.Status).Scan(
 		&updated.ID,
+		&updated.PublicCode,
 		&updated.CustomerName,
 		&updated.CustomerEmail,
 		&updated.ProductName,
@@ -372,6 +419,143 @@ func envOrDefault(key, fallback string) string {
 	return value
 }
 
+const publicCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+func generatePublicOrderCode(now time.Time) (string, error) {
+	const randomLength = 5
+
+	randomPart := make([]byte, randomLength)
+
+	for i := range randomPart {
+		randomIndex, err := randomInt(len(publicCodeAlphabet))
+		if err != nil {
+			return "", err
+		}
+
+		randomPart[i] = publicCodeAlphabet[randomIndex]
+	}
+
+	return fmt.Sprintf(
+		"PED-%d-%s",
+		now.Year(),
+		string(randomPart),
+	), nil
+}
+
+func randomInt(max int) (int, error) {
+	if max <= 0 || max > 256 {
+		return 0, errors.New("rango aleatorio inválido")
+	}
+
+	var randomByte [1]byte
+
+	for {
+		if _, err := rand.Read(randomByte[:]); err != nil {
+			return 0, err
+		}
+
+		limit := 256 - (256 % max)
+
+		if int(randomByte[0]) < limit {
+			return int(randomByte[0]) % max, nil
+		}
+	}
+}
+
+func isUniqueViolation(err error) bool {
+	var postgresError *pgconn.PgError
+
+	return errors.As(err, &postgresError) &&
+		postgresError.Code == "23505"
+}
+
 func debug(value any) {
 	fmt.Printf("%+v\n", value)
+}
+func (app *application) getOrderByPublicCode(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	publicCode := normalizePublicOrderCode(
+		r.PathValue("code"),
+	)
+
+	if publicCode == "" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"código de pedido inválido",
+		)
+		return
+	}
+
+	var item order
+
+	err := app.db.QueryRow(
+		r.Context(),
+		`
+			SELECT
+				id,
+				public_code,
+				customer_name,
+				customer_email,
+				product_name,
+				quantity,
+				shipping_address,
+				notes,
+				status,
+				created_at,
+				shipped_at,
+				received_at
+			FROM orders
+			WHERE public_code = $1
+		`,
+		publicCode,
+	).Scan(
+		&item.ID,
+		&item.PublicCode,
+		&item.CustomerName,
+		&item.CustomerEmail,
+		&item.ProductName,
+		&item.Quantity,
+		&item.ShippingAddress,
+		&item.Notes,
+		&item.Status,
+		&item.CreatedAt,
+		&item.ShippedAt,
+		&item.ReceivedAt,
+	)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(
+			w,
+			http.StatusNotFound,
+			"pedido no encontrado",
+		)
+		return
+	}
+
+	if err != nil {
+		log.Printf(
+			"error consultando pedido por código: %v",
+			err,
+		)
+
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"no se pudo consultar el pedido",
+		)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, item)
+}
+
+func normalizePublicOrderCode(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ToUpper(value)
+	value = strings.ReplaceAll(value, " ", "")
+
+	return value
 }
