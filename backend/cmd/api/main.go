@@ -57,7 +57,7 @@ func main() {
 		"postgres://pedidos_admin:pedidos_clave_2026@127.0.0.1:55432/pedidos?sslmode=disable",
 	)
 
-	log.Println("DATABASE_URL utilizada:", databaseURL)
+	// log.Println("DATABASE_URL utilizada:", databaseURL)
 
 	db, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
@@ -107,13 +107,15 @@ func main() {
 		app.requireAuth(app.updateOrderStatus),
 	)
 
+	port := envOrDefault("PORT", "8080")
+
 	server := &http.Server{
-		Addr:              ":8080",
+		Addr:              ":" + port,
 		Handler:           corsMiddleware(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Println("API disponible en http://localhost:8080")
+	log.Printf("API disponible en el puerto %s", port)
 	log.Fatal(server.ListenAndServe())
 }
 
@@ -395,12 +397,41 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+		allowedOrigins := strings.Split(
+			envOrDefault(
+				"ALLOWED_ORIGINS",
+				"http://localhost:5173",
+			),
+			",",
+		)
+
+		origin := r.Header.Get("Origin")
+
+		for _, allowedOrigin := range allowedOrigins {
+			if strings.TrimSpace(allowedOrigin) == origin {
+				w.Header().Set(
+					"Access-Control-Allow-Origin",
+					origin,
+				)
+
+				w.Header().Set(
+					"Vary",
+					"Origin",
+				)
+
+				break
+			}
+		}
+
 		w.Header().Set(
 			"Access-Control-Allow-Headers",
 			"Content-Type, Authorization",
 		)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+
+		w.Header().Set(
+			"Access-Control-Allow-Methods",
+			"GET, POST, PATCH, OPTIONS",
+		)
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
