@@ -384,9 +384,18 @@ async function authenticatedFetch(url, options = {}) {
               <article className="order-card" key={order.id}>
                 <div className="order-header">
                   <div>
-                    <span className="order-id">Pedido #{order.id}</span>
+                    <span className="order-id">
+  {order.public_code || `Pedido interno #${order.id}`}
+</span>
                     <h3>{order.product_name}</h3>
                   </div>
+                  <div className="order-identifiers">
+  <span className="order-id">
+    {order.public_code || "Sin código público"}
+  </span>
+
+  <small>ID interno: {order.id}</small>
+</div>
 
                   <span className={`status status-${order.status}`}>
                     {statusLabels[order.status]}
