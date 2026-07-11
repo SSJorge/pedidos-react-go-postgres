@@ -17,7 +17,8 @@ import (
 )
 
 type application struct {
-	db *pgxpool.Pool
+	db        *pgxpool.Pool
+	jwtSecret []byte
 }
 
 type order struct {
@@ -68,13 +69,36 @@ func main() {
 		log.Fatal("no se pudo conectar a PostgreSQL: ", err)
 	}
 
-	app := &application{db: db}
+	jwtSecret := envOrDefault(
+		"JWT_SECRET",
+		"cambiar-esta-clave-en-produccion-por-una-muy-larga",
+	)
+
+	app := &application{
+		db:        db,
+		jwtSecret: []byte(jwtSecret),
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", app.health)
-	mux.HandleFunc("GET /api/orders", app.listOrders)
-	mux.HandleFunc("POST /api/orders", app.createOrder)
-	mux.HandleFunc("PATCH /api/orders/{id}/status", app.updateOrderStatus)
+
+	mux.HandleFunc("POST /api/auth/login", app.login)
+	mux.HandleFunc("GET /api/auth/me", app.requireAuth(app.me))
+
+	mux.HandleFunc(
+		"GET /api/orders",
+		app.requireAuth(app.listOrders),
+	)
+
+	mux.HandleFunc(
+		"POST /api/orders",
+		app.requireAuth(app.createOrder),
+	)
+
+	mux.HandleFunc(
+		"PATCH /api/orders/{id}/status",
+		app.requireAuth(app.updateOrderStatus),
+	)
 
 	server := &http.Server{
 		Addr:              ":8080",
@@ -325,7 +349,10 @@ func writeError(w http.ResponseWriter, status int, message string) {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set(
+			"Access-Control-Allow-Headers",
+			"Content-Type, Authorization",
+		)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 
 		if r.Method == http.MethodOptions {

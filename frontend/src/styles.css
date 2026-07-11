@@ -195,6 +195,58 @@ dd {
   border-radius: 8px;
   padding: 0.8rem;
 }
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  background: white;
+  border: 1px solid #dde3ee;
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgba(31, 43, 77, 0.1);
+  padding: 2rem;
+}
+
+.login-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.login-form button {
+  margin-top: 0.5rem;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 2rem;
+}
+
+.session-info {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  text-align: right;
+}
+
+@media (max-width: 700px) {
+  .app-header {
+    flex-direction: column;
+  }
+
+  .session-info {
+    width: 100%;
+    justify-content: space-between;
+    text-align: left;
+  }
+}
 
 @media (max-width: 700px) {
   .form-grid,

@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 
 const API_URL = "http://localhost:8080/api";
+const TOKEN_KEY = "pedidos_access_token";
+const USER_KEY = "pedidos_user";
+
+const emptyLoginForm = {
+  email: "",
+  password: "",
+};
 
 const emptyForm = {
   customer_name: "",
@@ -23,13 +30,35 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [token, setToken] = useState(() =>
+  localStorage.getItem(TOKEN_KEY) || ""
+);
+
+const [user, setUser] = useState(() => {
+  const storedUser = localStorage.getItem(USER_KEY);
+
+  if (!storedUser) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(storedUser);
+  } catch {
+    return null;
+  }
+});
+
+const [loginForm, setLoginForm] = useState(emptyLoginForm);
+const [loginLoading, setLoginLoading] = useState(false);
 
   const loadOrders = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
-      const response = await fetch(`${API_URL}/orders`);
+      const response = await authenticatedFetch(
+  `${API_URL}/orders`
+);
       const data = await response.json();
 
       if (!response.ok) {
@@ -42,11 +71,83 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
+  if (token) {
     loadOrders();
-  }, [loadOrders]);
+  } else {
+    setLoading(false);
+  }
+}, [token, loadOrders]);
+  function logout() {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+
+    setToken("");
+    setUser(null);
+    setOrders([]);
+    setError("");
+}
+function updateLoginForm(event) {
+  const { name, value } = event.target;
+
+  setLoginForm((current) => ({
+    ...current,
+    [name]: value,
+  }));
+}
+
+async function login(event) {
+  event.preventDefault();
+
+  try {
+    setLoginLoading(true);
+    setError("");
+
+    const response = await fetch(`${API_URL}/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(loginForm),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.error || "No se pudo iniciar sesión"
+      );
+    }
+
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+
+    setToken(data.token);
+    setUser(data.user);
+    setLoginForm(emptyLoginForm);
+  } catch (requestError) {
+    setError(requestError.message);
+  } finally {
+    setLoginLoading(false);
+  }
+}
+async function authenticatedFetch(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (response.status === 401) {
+    logout();
+  }
+
+  return response;
+}
 
   function updateForm(event) {
     const { name, value } = event.target;
@@ -64,7 +165,9 @@ function App() {
       setSaving(true);
       setError("");
 
-      const response = await fetch(`${API_URL}/orders`, {
+      const response = await authenticatedFetch(
+  `${API_URL}/orders`,
+  {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -91,7 +194,9 @@ function App() {
     try {
       setError("");
 
-      const response = await fetch(`${API_URL}/orders/${orderId}/status`, {
+      const response = await authenticatedFetch(
+  `${API_URL}/orders/${orderId}/status`,
+  {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -112,17 +217,80 @@ function App() {
       setError(requestError.message);
     }
   }
+  if (!token || !user) {
+  return (
+    <main className="login-page">
+      <section className="login-card">
+        <p className="eyebrow">Panel administrativo</p>
+        <h1>Iniciar sesión</h1>
+        <p>
+          Ingresa con tu cuenta para gestionar los pedidos.
+        </p>
+
+        {error && <div className="error">{error}</div>}
+
+        <form onSubmit={login} className="login-form">
+          <label>
+            Correo
+            <input
+              type="email"
+              name="email"
+              value={loginForm.email}
+              onChange={updateLoginForm}
+              autoComplete="email"
+              required
+            />
+          </label>
+
+          <label>
+            Contraseña
+            <input
+              type="password"
+              name="password"
+              value={loginForm.password}
+              onChange={updateLoginForm}
+              autoComplete="current-password"
+              required
+            />
+          </label>
+
+          <button disabled={loginLoading}>
+            {loginLoading
+              ? "Ingresando..."
+              : "Iniciar sesión"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
 
   return (
     <main className="container">
-      <header>
-        <p className="eyebrow">MVP sin pagos</p>
-        <h1>Gestión manual de pedidos</h1>
-        <p>
-          Registra solicitudes y cambia manualmente su estado a enviado o
-          recibido.
-        </p>
-      </header>
+      <header className="app-header">
+  <div>
+    <p className="eyebrow">MVP sin pagos</p>
+    <h1>Gestión manual de pedidos</h1>
+    <p>
+      Registra solicitudes y cambia manualmente su estado a enviado o
+      recibido.
+    </p>
+  </div>
+
+  <div className="session-info">
+    <span>
+      Sesión iniciada como <strong>{user.name}</strong>
+    </span>
+
+    <button
+      type="button"
+      className="secondary"
+      onClick={logout}
+    >
+      Cerrar sesión
+    </button>
+  </div>
+</header>
 
       {error && <div className="error">{error}</div>}
 
