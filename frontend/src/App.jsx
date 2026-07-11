@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 
-const API_URL = "http://localhost:8080/api";
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  "http://localhost:8080/api";
 const TOKEN_KEY = "pedidos_access_token";
 const USER_KEY = "pedidos_user";
 
