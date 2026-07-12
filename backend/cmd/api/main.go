@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,8 +20,14 @@ import (
 )
 
 type application struct {
-	db        *pgxpool.Pool
-	jwtSecret []byte
+	db                    *pgxpool.Pool
+	jwtSecret             []byte
+	telegramToken         string
+	telegramWebhookSecret string
+	telegramClient        *http.Client
+
+	telegramSessionsMu sync.RWMutex
+	telegramSessions   map[int64]telegramSession
 }
 
 type order struct {
@@ -76,14 +83,32 @@ func main() {
 		"JWT_SECRET",
 		"cambiar-esta-clave-en-produccion-por-una-muy-larga",
 	)
+	telegramToken := strings.TrimSpace(
+		os.Getenv("TELEGRAM_BOT_TOKEN"),
+	)
+
+	telegramWebhookSecret := strings.TrimSpace(
+		os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
+	)
 
 	app := &application{
-		db:        db,
-		jwtSecret: []byte(jwtSecret),
+		db:                    db,
+		jwtSecret:             []byte(jwtSecret),
+		telegramToken:         telegramToken,
+		telegramWebhookSecret: telegramWebhookSecret,
+		telegramClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+		telegramSessions: make(map[int64]telegramSession),
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", app.health)
+
+	mux.HandleFunc(
+		"POST /telegram/webhook",
+		app.telegramWebhook,
+	)
 
 	mux.HandleFunc("POST /api/auth/login", app.login)
 	mux.HandleFunc("GET /api/auth/me", app.requireAuth(app.me))
@@ -506,7 +531,7 @@ func (app *application) getOrderByPublicCode(
 		r.PathValue("code"),
 	)
 
-	if publicCode == "" {
+	if !publicOrderCodePattern.MatchString(publicCode) {
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -515,41 +540,9 @@ func (app *application) getOrderByPublicCode(
 		return
 	}
 
-	var item order
-
-	err := app.db.QueryRow(
+	item, err := app.findOrderByPublicCode(
 		r.Context(),
-		`
-			SELECT
-				id,
-				public_code,
-				customer_name,
-				customer_email,
-				product_name,
-				quantity,
-				shipping_address,
-				notes,
-				status,
-				created_at,
-				shipped_at,
-				received_at
-			FROM orders
-			WHERE public_code = $1
-		`,
 		publicCode,
-	).Scan(
-		&item.ID,
-		&item.PublicCode,
-		&item.CustomerName,
-		&item.CustomerEmail,
-		&item.ProductName,
-		&item.Quantity,
-		&item.ShippingAddress,
-		&item.Notes,
-		&item.Status,
-		&item.CreatedAt,
-		&item.ShippedAt,
-		&item.ReceivedAt,
 	)
 
 	if errors.Is(err, pgx.ErrNoRows) {
