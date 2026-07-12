@@ -413,12 +413,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 					"Access-Control-Allow-Origin",
 					origin,
 				)
-
-				w.Header().Set(
-					"Vary",
-					"Origin",
-				)
-
+				w.Header().Set("Vary", "Origin")
 				break
 			}
 		}
