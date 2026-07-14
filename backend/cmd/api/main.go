@@ -28,6 +28,16 @@ type application struct {
 
 	telegramSessionsMu sync.RWMutex
 	telegramSessions   map[int64]telegramSession
+
+	whatsappAccessToken     string
+	whatsappPhoneNumberID   string
+	whatsappVerifyToken     string
+	whatsappAppSecret       string
+	whatsappGraphAPIVersion string
+	whatsappClient          *http.Client
+
+	whatsappSessionsMu sync.RWMutex
+	whatsappSessions   map[string]whatsappSession
 }
 
 type order struct {
@@ -90,6 +100,25 @@ func main() {
 	telegramWebhookSecret := strings.TrimSpace(
 		os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
 	)
+	whatsappAccessToken := strings.TrimSpace(
+		os.Getenv("WHATSAPP_ACCESS_TOKEN"),
+	)
+
+	whatsappPhoneNumberID := strings.TrimSpace(
+		os.Getenv("WHATSAPP_PHONE_NUMBER_ID"),
+	)
+
+	whatsappVerifyToken := strings.TrimSpace(
+		os.Getenv("WHATSAPP_VERIFY_TOKEN"),
+	)
+
+	whatsappAppSecret := strings.TrimSpace(
+		os.Getenv("WHATSAPP_APP_SECRET"),
+	)
+
+	whatsappGraphAPIVersion := strings.TrimSpace(
+		os.Getenv("WHATSAPP_GRAPH_API_VERSION"),
+	)
 
 	app := &application{
 		db:                    db,
@@ -99,11 +128,30 @@ func main() {
 		telegramClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		telegramSessions: make(map[int64]telegramSession),
+		telegramSessions:        make(map[int64]telegramSession),
+		whatsappAccessToken:     whatsappAccessToken,
+		whatsappPhoneNumberID:   whatsappPhoneNumberID,
+		whatsappVerifyToken:     whatsappVerifyToken,
+		whatsappAppSecret:       whatsappAppSecret,
+		whatsappGraphAPIVersion: whatsappGraphAPIVersion,
+		whatsappClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+		whatsappSessions: make(map[string]whatsappSession),
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", app.health)
+
+	mux.HandleFunc(
+		"GET /whatsapp/webhook",
+		app.verifyWhatsAppWebhook,
+	)
+
+	mux.HandleFunc(
+		"POST /whatsapp/webhook",
+		app.whatsappWebhook,
+	)
 
 	mux.HandleFunc(
 		"POST /telegram/webhook",
