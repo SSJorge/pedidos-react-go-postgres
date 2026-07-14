@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "870215874691",
+    "project_id": "pedidos-mobile-jorge",
+    "storage_bucket": "pedidos-mobile-jorge.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:870215874691:android:a0c387eeca995ebb5983b6",
+        "android_client_info": {
+          "package_name": "com.ssjorge.pedidos_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCi4f1n6CU2nL0z3ArN8gHiievGx7TZo-Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

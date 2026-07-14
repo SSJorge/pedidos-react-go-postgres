@@ -22,6 +22,7 @@ import (
 type application struct {
 	db                    *pgxpool.Pool
 	jwtSecret             []byte
+	push                  *pushNotifier
 	telegramToken         string
 	telegramWebhookSecret string
 	telegramClient        *http.Client
@@ -88,6 +89,17 @@ func main() {
 	if err := db.Ping(ctx); err != nil {
 		log.Fatal("no se pudo conectar a PostgreSQL: ", err)
 	}
+	push, pushErr := newPushNotifier(
+		context.Background(),
+	)
+	if pushErr != nil {
+		log.Printf(
+			"Firebase Push quedó deshabilitado: %v",
+			pushErr,
+		)
+
+		push = nil
+	}
 
 	jwtSecret := envOrDefault(
 		"JWT_SECRET",
@@ -123,6 +135,7 @@ func main() {
 	app := &application{
 		db:                    db,
 		jwtSecret:             []byte(jwtSecret),
+		push:                  push,
 		telegramToken:         telegramToken,
 		telegramWebhookSecret: telegramWebhookSecret,
 		telegramClient: &http.Client{
@@ -366,7 +379,7 @@ func (app *application) createOrder(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-
+	app.notifyOrderCreated(created)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -445,7 +458,7 @@ func (app *application) updateOrderStatus(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "no se pudo actualizar el pedido")
 		return
 	}
-
+	app.notifyOrderStatusChanged(updated)
 	writeJSON(w, http.StatusOK, updated)
 }
 
