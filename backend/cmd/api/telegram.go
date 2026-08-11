@@ -324,11 +324,23 @@ func (app *application) processTelegramOption(
 
 		answer = "Notas: " + notes
 
+	case "6":
+		switch item.Status {
+		case "solicitado":
+			answer = "Estado actual: Solicitado"
+		case "enviado":
+			answer = "Estado actual: Enviado"
+		case "recibido":
+			answer = "Estado actual: Recibido"
+		default:
+			answer = "Estado actual: " + item.Status
+		}
+
 	default:
 		return app.sendTelegramMessage(
 			ctx,
 			chatID,
-			"Selecciona una opción válida del 1 al 5.",
+			"Selecciona una opción válida del 1 al 6.",
 			telegramOptionsKeyboard(),
 		)
 	}
